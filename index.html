@@ -300,9 +300,12 @@
         const newCompletions = { ...state.completions };
         state.chores.forEach(c => {
           const val = state.onboardDrafts[c.id];
-          if (val) {
-            newCompletions[c.id] = new Date(val + "T12:00:00").toISOString();
-          }
+          if (val === "" || val === undefined) return; // "Not scheduled" — leave no completion, will show overdue
+          const nextDue  = new Date(val + "T12:00:00");
+          const interval = (FREQ_DAYS[c.frequency] || 7) * 86400000;
+          // last done = next due minus one full interval
+          const lastDone = new Date(nextDue.getTime() - interval);
+          newCompletions[c.id] = lastDone.toISOString();
         });
         state.completions = newCompletions;
         state.onboarded = true;
@@ -324,8 +327,8 @@
             </div>
             <input type="date" id="onboard-date-${c.id}" class="inp" value="${val}"
               onchange="ck.updateOnboardDraft(${c.id}, this.value)" style="color-scheme:dark" />
-            <button class="btn btn-ghost" onclick="ck.setOnboardToday(${c.id})">Today</button>
-            <button class="btn btn-ghost" onclick="ck.setOnboardNeverDone(${c.id})">Never</button>
+            <button class="btn btn-ghost" onclick="ck.setOnboardToday(${c.id})">Due today</button>
+            <button class="btn btn-ghost" onclick="ck.setOnboardNeverDone(${c.id})">Overdue</button>
           </div>`;
       }).join("");
 
@@ -333,12 +336,12 @@
         <div class="onboard-wrap">
           <h1 class="onboard-title">👋 Quick setup</h1>
           <p class="onboard-sub">
-            Before the board goes live, tell me when you last did each chore — otherwise
-            everything looks overdue on day one, which isn't true. Defaults to today;
-            adjust anything that's actually further out, or mark it "Never" if it's brand new.
+            When is each chore next due? Pick the date you expect to do it next and
+            the app will work backward to figure out your current status. Hit "Due today"
+            if you're about to do it now, or "Overdue" to flag it as already behind.
           </p>
           <div class="onboard-actions">
-            <button class="btn btn-ghost" onclick="ck.setAllOnboardToday()">Set all to today</button>
+            <button class="btn btn-ghost" onclick="ck.setAllOnboardToday()">Set all to due today</button>
           </div>
           <div class="stack">${rows}</div>
           <button class="btn btn-primary onboard-finish" onclick="ck.finishOnboarding()">Start tracking →</button>
