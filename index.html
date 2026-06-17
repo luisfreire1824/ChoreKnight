@@ -282,6 +282,15 @@
         render();
       },
 
+      resetOnboarding() {
+        if (!confirm("This will clear all completion history and bring back the setup screen. Continue?")) return;
+        state.completions = {};
+        state.onboarded   = false;
+        state.chores.forEach(c => { state.onboardDrafts[c.id] = todayStr(); });
+        saveCompletions();
+        saveMeta();
+      },
+
       finishOnboarding() {
         // Read any live input values first
         state.chores.forEach(c => {
@@ -523,7 +532,11 @@
           <button class="btn btn-primary" onclick="ck.addChore()" style="align-self:flex-start">+ Add</button>
         </div>
         <p class="section-title">All chores (${state.chores.length})</p>
-        <div class="stack">${rows}</div>`;
+        <div class="stack">${rows}</div>
+        <div class="reset-zone">
+          <button class="btn btn-danger" onclick="ck.resetOnboarding()">↺ Redo setup</button>
+          <p class="reset-hint">Clears completion history and returns to the setup screen.</p>
+        </div>`;
     }
 
     // ── Main render ───────────────────────────────────────────────────────────
@@ -644,6 +657,10 @@
     .day-chips     { display: flex; gap: 6px; flex-wrap: wrap; }
     .day-chip      { display: flex; align-items: center; gap: 4px; padding: 5px 9px; border-radius: 7px; border: 1px solid #1e2535; background: #0c1018; font-size: 12px; color: #9ca3af; cursor: pointer; }
     .day-chip input { accent-color: #6366f1; cursor: pointer; }
+
+    /* Reset zone */
+    .reset-zone  { margin-top: 32px; padding-top: 20px; border-top: 1px solid #1e2535; display: flex; align-items: center; gap: 12px; }
+    .reset-hint  { font-size: 12px; color: #4b5563; }
 
     /* Empty state */
     .empty { color: #6b7280; text-align: center; padding: 40px 0; font-size: 14px; }
