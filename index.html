@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chore Knight</title>
+
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp }                          from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    // ── Config ────────────────────────────────────────────────────────────────
+    const firebaseConfig = {
+      apiKey:            "AIzaSyCvypf9COF4mmVZnvuSg3WfE_ngGAHWF8A",
+      authDomain:        "luisfre-chore-knight.firebaseapp.com",
+      projectId:         "luisfre-chore-knight",
+      storageBucket:     "luisfre-chore-knight.firebasestorage.app",
+      messagingSenderId: "634581126202",
+      appId:             "1:634581126202:web:53acd024707ff9bcfcf903",
+      measurementId:     "G-2SN9LCHJVR"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db  = getFirestore(app);
+
+    // ── Default data ──────────────────────────────────────────────────────────
+    const DEFAULT_CHORES = [
+      { id: 1,  name: "Sweep",              frequency: "Weekly",        assignee: "Luis", urgent: false, note: "" },
+      { id: 2,  name: "Mop floors",         frequency: "Weekly",        assignee: "Luis", urgent: false, note: "" },
+      { id: 3,  name: "Clean bathrooms",    frequency: "Weekly",        assignee: "Luis", urgent: false, note: "" },
+      { id: 4,  name: "Do laundry",         frequency: "Weekly",        assignee: "Luis", urgent: false, note: "" },
+      { id: 5,  name: "Fold clothes",       frequency: "Weekly",        assignee: "Luis", urgent: false, note: "" },
+      { id: 6,  name: "Wash dishes",        frequency: "Daily",         assignee: "Luis", urgent: false, note: "" },
+      { id: 7,  name: "Take out trash",     frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Mon & Thu nights" },
+      { id: 8,  name: "Take out recycling", frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Tue night" },
+      { id: 9,  name: "Mow front lawn",     frequency: "Every 2 weeks", assignee: "Luis", urgent: false, note: "" },
+      { id: 10, name: "Mow backyard",       frequency: "Every 2 weeks", assignee: "Luis", urgent: false, note: "" },
+      { id: 11, name: "Wash the car",       frequency: "Monthly",       assignee: "Luis", urgent: false, note: "Or as needed" },
+      { id: 12, name: "Cook dinner",        frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Fridays" },
+      { id: 13, name: "1hr workout",        frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Mon / Wed / Fri" },
+      { id: 14, name: "Brush Kora",         frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Wednesdays" },
+      { id: 15, name: "Brush Kenai",        frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Wednesdays" },
+    ];
+
+    const DEFAULT_PROJECTS = [
+      { id: 101, name: "Get rid of branches on the ground", due: "2026-06-19", done: false },
+      { id: 102, name: "Put up the pool",                   due: "2026-06-28", done: false },
+      { id: 103, name: "Put up privacy screens",            due: "2026-07-03", done: false },
+    ];
+
+    const FREQ_DAYS = { "Daily": 1, "Every other day": 2, "Weekly": 7, "Every 2 weeks": 14, "Monthly": 30 };
+    const FREQUENCIES = ["Daily", "Every other day", "Weekly", "Every 2 weeks", "Monthly"];
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    let state = {
+      chores:      DEFAULT_CHORES,
+      projects:    DEFAULT_PROJECTS,
+      completions: {},   // { choreId: isoString }
+      tab:         "board",
+      filter:      "all",
+      editChoreId: null,
+      editProjId:  null,
+      newChore:    { name: "", frequency: "Weekly", assignee: "Luis", note: "" },
+      newProj:     { name: "", due: "" },
+      loaded:      false,
+    };
+
+    // ── Firestore refs ────────────────────────────────────────────────────────
+    const choreRef      = doc(db, "choreKnight", "chores");
+    const projectRef    = doc(db, "choreKnight", "projects");
+    const completionRef = doc(db, "choreKnight", "completions");
+
+    // ── Persist helpers ───────────────────────────────────────────────────────
+    async function saveChores()      { await setDoc(choreRef,      { list: state.chores }); }
+    async function saveProjects()    { await setDoc(projectRef,    { list: state.projects }); }
+    async function saveCompletions() { await setDoc(completionRef, { data: state.completions }); }
+
+    // ── Load + realtime listener ──────────────────────────────────────────────
+    async function bootstrap() {
+      const [cd, pd, cpd] = await Promise.all([
+        getDoc(choreRef), getDoc(projectRef), getDoc(completionRef)
+      ]);
+      if (cd.exists())  state.chores      = cd.data().list;
+      if (pd.exists())  state.projects    = pd.data().list;
+      if (cpd.exists()) state.completions = cpd.data().data;
+      state.loaded = true;
+      render();
+
+      // Live updates (so Bibi's changes appear instantly)
+      onSnapshot(choreRef,      s => { if (s.exists()) { state.chores      = s.data().list;  render(); } });
+      onSnapshot(projectRef,    s => { if (s.exists()) { state.projects    = s.data().list;  render(); } });
+      onSnapshot(completionRef, s => { if (s.exists()) { state.completions = s.data().data;  render(); } });
+    }
+
+    // ── Logic ─────────────────────────────────────────────────────────────────
+    function getDaysLeft(lastDone, freq) {
+      if (!lastDone) return -999;
+      const diff = Math.floor((Date.now() - new Date(lastDone)) / 86400000);
+      return (FREQ_DAYS[freq] || 7) - diff;
+    }
+
+    function getStatus(lastDone, freq, urgent) {
+      if (urgent) return "urgent";
+      const d = getDaysLeft(lastDone, freq);
+      if (d < 0) return "overdue";
+      if (d === 0) return "due";
+      return "ok";
+    }
+
+    function formatLastDone(d) {
+      if (!d) return "Never done";
+      const days = Math.floor((Date.now() - new Date(d)) / 86400000);
+      if (days === 0) return "Done today";
+      if (days === 1) return "Done yesterday";
+      return `Done ${days}d ago`;
+    }
+
+    function projectDaysLeft(due) {
+      return Math.ceil((new Date(due + "T12:00:00") - Date.now()) / 86400000);
+    }
+
+    function fmtDate(iso) {
+      return new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    }
+
+    function enrichedChores() {
+      return state.chores.map(c => ({
+        ...c,
+        lastDone: state.completions[c.id] || null,
+        status:   getStatus(state.completions[c.id], c.frequency, c.urgent),
+        daysLeft: getDaysLeft(state.completions[c.id], c.frequency),
+      })).sort((a, b) => {
+        const o = { urgent: 0, overdue: 1, due: 2, ok: 3 };
+        return o[a.status] - o[b.status];
+      });
+    }
+
+    // ── Actions ───────────────────────────────────────────────────────────────
+    window.ck = {
+      setTab(t)    { state.tab = t; state.editChoreId = null; render(); },
+      setFilter(f) { state.filter = f; render(); },
+
+      markDone(id) {
+        state.completions[id] = new Date().toISOString();
+        state.chores = state.chores.map(c => c.id === id ? { ...c, urgent: false } : c);
+        saveChores(); saveCompletions();
+      },
+
+      toggleUrgent(id) {
+        state.chores = state.chores.map(c => c.id === id ? { ...c, urgent: !c.urgent } : c);
+        saveChores();
+      },
+
+      deleteChore(id) {
+        state.chores = state.chores.filter(c => c.id !== id);
+        delete state.completions[id];
+        saveChores(); saveCompletions();
+      },
+
+      editChore(id) { state.editChoreId = id; render(); },
+      cancelEdit()  { state.editChoreId = null; render(); },
+
+      saveChoreEdit(id) {
+        const name      = document.getElementById("edit-name").value.trim();
+        const frequency = document.getElementById("edit-freq").value;
+        const assignee  = document.getElementById("edit-assignee").value.trim();
+        const note      = document.getElementById("edit-note").value.trim();
+        if (!name) return;
+        state.chores = state.chores.map(c => c.id === id ? { ...c, name, frequency, assignee, note } : c);
+        state.editChoreId = null;
+        saveChores();
+      },
+
+      updateNewChore(field, val) { state.newChore[field] = val; },
+
+      addChore() {
+        const name = document.getElementById("new-chore-name").value.trim();
+        if (!name) return;
+        const freq     = document.getElementById("new-chore-freq").value;
+        const assignee = document.getElementById("new-chore-assignee").value.trim() || "Luis";
+        const note     = document.getElementById("new-chore-note").value.trim();
+        state.chores.push({ id: Date.now(), name, frequency: freq, assignee, urgent: false, note });
+        saveChores();
+        state.newChore = { name: "", frequency: "Weekly", assignee: "Luis", note: "" };
+        render();
+      },
+
+      toggleProjectDone(id) {
+        state.projects = state.projects.map(p => p.id === id ? { ...p, done: !p.done } : p);
+        saveProjects();
+      },
+
+      deleteProject(id) {
+        state.projects = state.projects.filter(p => p.id !== id);
+        saveProjects();
+      },
+
+      addProject() {
+        const name = document.getElementById("new-proj-name").value.trim();
+        const due  = document.getElementById("new-proj-due").value;
+        if (!name || !due) return;
+        state.projects.push({ id: Date.now(), name, due, done: false });
+        saveProjects();
+        render();
+      },
+    };
+
+    // ── Render ────────────────────────────────────────────────────────────────
+    function statusStyle(status) {
+      const map = {
+        urgent:  { border: "#f59e0b", bg: "rgba(245,158,11,0.08)",  badge: "#f59e0b", badgeBg: "rgba(245,158,11,0.18)",  label: "⚡ Urgent"  },
+        overdue: { border: "#ef4444", bg: "rgba(239,68,68,0.07)",   badge: "#ef4444", badgeBg: "rgba(239,68,68,0.15)",   label: "Overdue"   },
+        due:     { border: "#fb923c", bg: "rgba(251,146,60,0.07)",  badge: "#fb923c", badgeBg: "rgba(251,146,60,0.15)",  label: "Due today" },
+        ok:      { border: "#1e2535", bg: "#161b27",                badge: "#10b981", badgeBg: "rgba(16,185,129,0.12)", label: "ok"        },
+      };
+      return map[status];
+    }
+
+    function freqOptions(selected) {
+      return FREQUENCIES.map(f => `<option value="${f}" ${f === selected ? "selected" : ""}>${f}</option>`).join("");
+    }
+
+    function renderBoard() {
+      const all     = enrichedChores();
+      const attn    = all.filter(c => c.status !== "ok").length;
+      const filtered = state.filter === "all"       ? all
+                     : state.filter === "attention" ? all.filter(c => c.status !== "ok")
+                     : all.filter(c => c.status === "ok");
+
+      const pills = [
+        ["all",       `All (${all.length})`],
+        ["attention", `⚠️ Needs doing (${attn})`],
+        ["ok",        `✅ Up to date (${all.length - attn})`],
+      ].map(([k, l]) => `
+        <button class="pill ${state.filter === k ? "pill-active" : ""}" onclick="ck.setFilter('${k}')">${l}</button>
+      `).join("");
+
+      const cards = filtered.map(c => {
+        const s         = statusStyle(c.status);
+        const daysLabel = c.status === "ok" ? `In ${c.daysLeft}d` : s.label;
+        return `
+          <div class="card" style="background:${s.bg};border-color:${s.border}">
+            <button class="urgent-dot" style="background:${c.urgent ? "#f59e0b" : "#2a3045"}"
+              onclick="ck.toggleUrgent(${c.id})" title="${c.urgent ? "Clear urgent" : "Mark urgent"}"></button>
+            <div class="card-body">
+              <div class="card-title-row">
+                <span class="card-name">${c.name}</span>
+                <span class="badge" style="color:${s.badge};background:${s.badgeBg}">${daysLabel}</span>
+              </div>
+              <div class="card-meta">
+                <span>🔄 ${c.frequency}</span>
+                <span>👤 ${c.assignee}</span>
+                <span>${formatLastDone(c.lastDone)}</span>
+                ${c.note ? `<span>· ${c.note}</span>` : ""}
+              </div>
+            </div>
+            <button class="btn ${c.status === "ok" ? "btn-done" : "btn-primary"}" onclick="ck.markDone(${c.id})">
+              ${c.status === "ok" ? "✓ Done" : "Mark done"}
+            </button>
+          </div>`;
+      }).join("") || `<p class="empty">Nothing here.</p>`;
+
+      return `
+        <div class="pills">${pills}</div>
+        <div class="stack">${cards}</div>
+        <p class="hint">Tap the dot on any card to flag it as urgent.</p>`;
+    }
+
+    function renderProjects() {
+      const sorted = [...state.projects].sort((a, b) => new Date(a.due) - new Date(b.due));
+      const items = sorted.map(p => {
+        const dl      = projectDaysLeft(p.due);
+        const overdue = !p.done && dl < 0;
+        const soon    = !p.done && dl >= 0 && dl <= 3;
+        const border  = p.done ? "#1e2535" : overdue ? "#ef4444" : soon ? "#f59e0b" : "#1e2535";
+        const bg      = p.done ? "#161b27" : overdue ? "rgba(239,68,68,0.07)" : soon ? "rgba(245,158,11,0.07)" : "#161b27";
+        const dueStr  = !p.done
+          ? (overdue ? `<span style="color:#ef4444">${Math.abs(dl)}d overdue</span>`
+            : dl === 0 ? `<span style="color:#fb923c">Due today!</span>`
+            : `<span style="color:#6b7280">${dl}d left</span>`)
+          : `<span style="color:#10b981">✓ Done</span>`;
+        return `
+          <div class="card" style="background:${bg};border-color:${border}">
+            <input type="checkbox" class="proj-check" ${p.done ? "checked" : ""} onchange="ck.toggleProjectDone(${p.id})" />
+            <div class="card-body">
+              <span class="card-name" style="${p.done ? "text-decoration:line-through;color:#6b7280" : ""}">${p.name}</span>
+              <div class="card-meta"><span>📅 Due ${fmtDate(p.due)}</span>${dueStr}</div>
+            </div>
+            <button class="btn btn-danger" onclick="ck.deleteProject(${p.id})">Remove</button>
+          </div>`;
+      }).join("") || `<p class="empty">No projects yet.</p>`;
+
+      return `
+        <p class="section-title">One-time projects</p>
+        <div class="stack">${items}</div>
+        <p class="section-title" style="margin-top:24px">Add a project</p>
+        <div class="add-box">
+          <input id="new-proj-name" class="inp" placeholder="Project name" style="flex:2 1 180px" />
+          <input id="new-proj-due"  class="inp" type="date" style="flex:1 1 130px;color-scheme:dark" />
+          <button class="btn btn-primary" onclick="ck.addProject()">+ Add</button>
+        </div>`;
+    }
+
+    function renderManage() {
+      const rows = state.chores.map(c => {
+        if (state.editChoreId === c.id) return `
+          <div class="manage-row" style="border-color:#6366f1">
+            <div class="edit-fields">
+              <input id="edit-name"     class="inp" value="${c.name}"      style="flex:2 1 130px" />
+              <select id="edit-freq"    class="inp" style="flex:1 1 110px;cursor:pointer">${freqOptions(c.frequency)}</select>
+              <input id="edit-assignee" class="inp" value="${c.assignee}"  placeholder="Assignee" style="flex:1 1 90px" />
+              <input id="edit-note"     class="inp" value="${c.note || ""}" placeholder="Note" style="flex:1 1 110px" />
+              <button class="btn btn-primary" onclick="ck.saveChoreEdit(${c.id})">Save</button>
+              <button class="btn btn-ghost"   onclick="ck.cancelEdit()">Cancel</button>
+            </div>
+          </div>`;
+        return `
+          <div class="manage-row">
+            <div class="card-body">
+              <span class="card-name">${c.name}</span>
+              <span class="meta-chip">${c.frequency}</span>
+              <span class="meta-chip">· ${c.assignee}</span>
+              ${c.note ? `<span class="meta-chip">· ${c.note}</span>` : ""}
+            </div>
+            <button class="btn btn-ghost"   onclick="ck.editChore(${c.id})">Edit</button>
+            <button class="btn btn-danger"  onclick="ck.deleteChore(${c.id})">Delete</button>
+          </div>`;
+      }).join("");
+
+      return `
+        <p class="section-title">Add a chore</p>
+        <div class="add-box" style="margin-bottom:20px">
+          <input  id="new-chore-name"     class="inp" placeholder="Chore name"       style="flex:2 1 150px" />
+          <select id="new-chore-freq"     class="inp" style="flex:1 1 120px;cursor:pointer">${freqOptions("Weekly")}</select>
+          <input  id="new-chore-assignee" class="inp" placeholder="Assignee"          style="flex:1 1 100px" value="Luis" />
+          <input  id="new-chore-note"     class="inp" placeholder="Note (optional)"   style="flex:2 1 140px" />
+          <button class="btn btn-primary" onclick="ck.addChore()">+ Add</button>
+        </div>
+        <p class="section-title">All chores (${state.chores.length})</p>
+        <div class="stack">${rows}</div>`;
+    }
+
+    function render() {
+      if (!state.loaded) {
+        document.getElementById("app").innerHTML = `<div class="loading">Loading Chore Knight...</div>`;
+        return;
+      }
+
+      const all    = enrichedChores();
+      const attn   = all.filter(c => c.status !== "ok").length;
+      const subMsg = attn > 0 ? `${attn} need${attn === 1 ? "s" : ""} attention` : "All caught up ✓";
+
+      const tabs = [["board","📋 Board"],["projects","🔨 Projects"],["manage","⚙️ Manage"]].map(([v, l]) =>
+        `<button class="tab-btn ${state.tab === v ? "tab-active" : ""}" onclick="ck.setTab('${v}')">${l}</button>`
+      ).join("");
+
+      const content = state.tab === "board"    ? renderBoard()
+                    : state.tab === "projects" ? renderProjects()
+                    : renderManage();
+
+      document.getElementById("app").innerHTML = `
+        <div class="header">
+          <div>
+            <h1 class="logo">🏠 Chore Knight</h1>
+            <p class="sub">${subMsg}</p>
+          </div>
+          <div class="tabs">${tabs}</div>
+        </div>
+        <div class="body">${content}</div>`;
+    }
+
+    bootstrap();
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0c1018; color: #e5e7eb; font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+
+    #app { min-height: 100vh; }
+
+    .loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
+
+    /* Header */
+    .header { background: #111827; border-bottom: 1px solid #1e2535; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; position: sticky; top: 0; z-index: 10; }
+    .logo   { font-size: 18px; font-weight: 700; color: #f9fafb; letter-spacing: -0.3px; }
+    .sub    { font-size: 12px; color: #6b7280; margin-top: 2px; }
+    .tabs   { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tab-btn  { padding: 7px 13px; border-radius: 8px; border: 1px solid #1e2535; background: transparent; color: #9ca3af; font-size: 13px; font-weight: 500; cursor: pointer; }
+    .tab-active { border-color: #6366f1; background: #6366f1; color: #fff; }
+
+    /* Body */
+    .body { max-width: 740px; margin: 0 auto; padding: 20px 16px 60px; }
+
+    /* Pills */
+    .pills { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+    .pill  { padding: 5px 12px; border-radius: 20px; border: 1px solid #1e2535; background: transparent; color: #6b7280; font-size: 12px; font-weight: 500; cursor: pointer; }
+    .pill-active { border-color: #6366f1; background: rgba(99,102,241,0.15); color: #a5b4fc; }
+
+    /* Cards */
+    .stack { display: flex; flex-direction: column; gap: 8px; }
+    .card  { border: 1px solid #1e2535; border-radius: 12px; padding: 13px 15px; display: flex; align-items: center; gap: 12px; transition: border-color 0.15s; }
+    .card-body      { flex: 1; min-width: 0; }
+    .card-title-row { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; flex-wrap: wrap; }
+    .card-name      { font-weight: 600; font-size: 14px; color: #f3f4f6; }
+    .card-meta      { font-size: 12px; color: #6b7280; display: flex; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+    .badge          { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+
+    /* Urgent dot */
+    .urgent-dot { width: 10px; height: 10px; border-radius: 50%; border: none; flex-shrink: 0; cursor: pointer; padding: 0; }
+
+    /* Project checkbox */
+    .proj-check { width: 16px; height: 16px; accent-color: #6366f1; flex-shrink: 0; cursor: pointer; }
+
+    /* Hint */
+    .hint { font-size: 11px; color: #374151; margin-top: 14px; text-align: center; }
+
+    /* Buttons */
+    .btn         { padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+    .btn-primary { background: #6366f1; color: #fff; border: none; }
+    .btn-ghost   { background: transparent; color: #9ca3af; border: 1px solid #1e2535; }
+    .btn-danger  { background: transparent; color: #ef4444; border: 1px solid #1e2535; }
+    .btn-done    { background: #1e2535; color: #6b7280; border: none; }
+
+    /* Inputs */
+    .inp { padding: 8px 11px; border-radius: 8px; border: 1px solid #1e2535; background: #0c1018; color: #f3f4f6; font-size: 13px; outline: none; font-family: inherit; }
+    .inp:focus { border-color: #6366f1; }
+
+    /* Add box */
+    .add-box { background: #161b27; border: 1px solid #1e2535; border-radius: 12px; padding: 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    /* Section title */
+    .section-title { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
+
+    /* Manage rows */
+    .manage-row { background: #161b27; border: 1px solid #1e2535; border-radius: 10px; padding: 11px 13px; display: flex; align-items: center; gap: 10px; }
+    .edit-fields { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; width: 100%; }
+    .meta-chip   { font-size: 12px; color: #6b7280; margin-left: 4px; }
+
+    /* Empty state */
+    .empty { color: #6b7280; text-align: center; padding: 40px 0; font-size: 14px; }
+
+    /* Mobile */
+    @media (max-width: 480px) {
+      .header { padding: 12px 14px; }
+      .body   { padding: 14px 12px 60px; }
+      .tab-btn { padding: 6px 10px; font-size: 12px; }
+      .card   { padding: 11px 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+</body>
+</html>
