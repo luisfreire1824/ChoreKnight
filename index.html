@@ -24,23 +24,28 @@
     const app = initializeApp(firebaseConfig);
     const db  = getFirestore(app);
 
-    // ── Default data ──────────────────────────────────────────────────────────
+    // ── Constants ────────────────────────────────────────────────────────────
+    const DAY_NAMES  = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const FREQ_DAYS  = { "Daily": 1, "Every other day": 2, "Weekly": 7, "Every 2 weeks": 14, "Monthly": 30 };
+    const FREQUENCIES = ["Daily", "Every other day", "Weekly", "Every 2 weeks", "Monthly"];
+
+    // days: array of 0-6 (Sun-Sat), empty array = no specific day, use frequency only
     const DEFAULT_CHORES = [
-      { id: 1,  name: "Sweep",              frequency: "Weekly",        assignee: "Luis", urgent: false, note: "" },
-      { id: 2,  name: "Mop floors",         frequency: "Weekly",        assignee: "Luis", urgent: false, note: "" },
-      { id: 3,  name: "Clean bathrooms",    frequency: "Weekly",        assignee: "Luis", urgent: false, note: "" },
-      { id: 4,  name: "Do laundry",         frequency: "Weekly",        assignee: "Luis", urgent: false, note: "" },
-      { id: 5,  name: "Fold clothes",       frequency: "Weekly",        assignee: "Luis", urgent: false, note: "" },
-      { id: 6,  name: "Wash dishes",        frequency: "Daily",         assignee: "Luis", urgent: false, note: "" },
-      { id: 7,  name: "Take out trash",     frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Mon & Thu nights" },
-      { id: 8,  name: "Take out recycling", frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Tue night" },
-      { id: 9,  name: "Mow front lawn",     frequency: "Every 2 weeks", assignee: "Luis", urgent: false, note: "" },
-      { id: 10, name: "Mow backyard",       frequency: "Every 2 weeks", assignee: "Luis", urgent: false, note: "" },
-      { id: 11, name: "Wash the car",       frequency: "Monthly",       assignee: "Luis", urgent: false, note: "Or as needed" },
-      { id: 12, name: "Cook dinner",        frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Fridays" },
-      { id: 13, name: "1hr workout",        frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Mon / Wed / Fri" },
-      { id: 14, name: "Brush Kora",         frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Wednesdays" },
-      { id: 15, name: "Brush Kenai",        frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Wednesdays" },
+      { id: 1,  name: "Sweep",              frequency: "Weekly",        assignee: "Luis", urgent: false, note: "",               days: [] },
+      { id: 2,  name: "Mop floors",         frequency: "Weekly",        assignee: "Luis", urgent: false, note: "",               days: [] },
+      { id: 3,  name: "Clean bathrooms",    frequency: "Weekly",        assignee: "Luis", urgent: false, note: "",               days: [] },
+      { id: 4,  name: "Do laundry",         frequency: "Weekly",        assignee: "Luis", urgent: false, note: "",               days: [] },
+      { id: 5,  name: "Fold clothes",       frequency: "Weekly",        assignee: "Luis", urgent: false, note: "",               days: [] },
+      { id: 6,  name: "Wash dishes",        frequency: "Daily",         assignee: "Luis", urgent: false, note: "",               days: [] },
+      { id: 7,  name: "Take out trash",     frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Mon & Thu nights", days: [1, 4] },
+      { id: 8,  name: "Take out recycling", frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Tue night",        days: [2] },
+      { id: 9,  name: "Mow front lawn",     frequency: "Every 2 weeks", assignee: "Luis", urgent: false, note: "",               days: [] },
+      { id: 10, name: "Mow backyard",       frequency: "Every 2 weeks", assignee: "Luis", urgent: false, note: "",               days: [] },
+      { id: 11, name: "Wash the car",       frequency: "Monthly",       assignee: "Luis", urgent: false, note: "Or as needed",    days: [] },
+      { id: 12, name: "Cook dinner",        frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Fridays",         days: [5] },
+      { id: 13, name: "1hr workout",        frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Mon / Wed / Fri", days: [1, 3, 5] },
+      { id: 14, name: "Brush Kora",         frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Wednesdays",      days: [3] },
+      { id: 15, name: "Brush Kenai",        frequency: "Weekly",        assignee: "Luis", urgent: false, note: "Wednesdays",      days: [3] },
     ];
 
     const DEFAULT_PROJECTS = [
@@ -49,63 +54,119 @@
       { id: 103, name: "Put up privacy screens",            due: "2026-07-03", done: false },
     ];
 
-    const FREQ_DAYS = { "Daily": 1, "Every other day": 2, "Weekly": 7, "Every 2 weeks": 14, "Monthly": 30 };
-    const FREQUENCIES = ["Daily", "Every other day", "Weekly", "Every 2 weeks", "Monthly"];
-
     // ── State ─────────────────────────────────────────────────────────────────
     let state = {
-      chores:      DEFAULT_CHORES,
-      projects:    DEFAULT_PROJECTS,
-      completions: {},   // { choreId: isoString }
-      tab:         "board",
-      filter:      "all",
-      editChoreId: null,
-      editProjId:  null,
-      newChore:    { name: "", frequency: "Weekly", assignee: "Luis", note: "" },
-      newProj:     { name: "", due: "" },
-      loaded:      false,
+      chores:        DEFAULT_CHORES,
+      projects:      DEFAULT_PROJECTS,
+      completions:   {},     // { choreId: isoString }
+      onboarded:     false,  // has the one-time setup screen been completed?
+      onboardDrafts: {},     // { choreId: "yyyy-mm-dd" } working values during setup
+      tab:           "board",
+      filter:        "all",
+      editChoreId:   null,
+      loaded:        false,
     };
 
     // ── Firestore refs ────────────────────────────────────────────────────────
     const choreRef      = doc(db, "choreKnight", "chores");
     const projectRef    = doc(db, "choreKnight", "projects");
     const completionRef = doc(db, "choreKnight", "completions");
+    const metaRef       = doc(db, "choreKnight", "meta");
 
     // ── Persist helpers ───────────────────────────────────────────────────────
     async function saveChores()      { await setDoc(choreRef,      { list: state.chores }); }
     async function saveProjects()    { await setDoc(projectRef,    { list: state.projects }); }
     async function saveCompletions() { await setDoc(completionRef, { data: state.completions }); }
+    async function saveMeta()        { await setDoc(metaRef,       { onboarded: state.onboarded }); }
 
     // ── Load + realtime listener ──────────────────────────────────────────────
     async function bootstrap() {
-      const [cd, pd, cpd] = await Promise.all([
-        getDoc(choreRef), getDoc(projectRef), getDoc(completionRef)
+      const [cd, pd, cpd, md] = await Promise.all([
+        getDoc(choreRef), getDoc(projectRef), getDoc(completionRef), getDoc(metaRef)
       ]);
-      if (cd.exists())  state.chores      = cd.data().list;
+      if (cd.exists())  state.chores      = cd.data().list.map(c => ({ days: [], ...c }));
       if (pd.exists())  state.projects    = pd.data().list;
       if (cpd.exists()) state.completions = cpd.data().data;
+      if (md.exists())  state.onboarded   = md.data().onboarded;
+
+      // Seed onboarding drafts with today's date for any chore not yet done
+      state.chores.forEach(c => {
+        if (!state.completions[c.id]) state.onboardDrafts[c.id] = todayStr();
+      });
+
       state.loaded = true;
       render();
 
       // Live updates (so Bibi's changes appear instantly)
-      onSnapshot(choreRef,      s => { if (s.exists()) { state.chores      = s.data().list;  render(); } });
-      onSnapshot(projectRef,    s => { if (s.exists()) { state.projects    = s.data().list;  render(); } });
-      onSnapshot(completionRef, s => { if (s.exists()) { state.completions = s.data().data;  render(); } });
+      onSnapshot(choreRef,      s => { if (s.exists()) { state.chores      = s.data().list.map(c => ({ days: [], ...c })); render(); } });
+      onSnapshot(projectRef,    s => { if (s.exists()) { state.projects    = s.data().list; render(); } });
+      onSnapshot(completionRef, s => { if (s.exists()) { state.completions = s.data().data; render(); } });
+      onSnapshot(metaRef,       s => { if (s.exists()) { state.onboarded   = s.data().onboarded; render(); } });
     }
 
-    // ── Logic ─────────────────────────────────────────────────────────────────
-    function getDaysLeft(lastDone, freq) {
+    // ── Date helpers ──────────────────────────────────────────────────────────
+    function todayStr() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    }
+
+    function daysBetween(a, b) {
+      // a, b are Date objects, returns whole days a - b
+      return Math.round((a.setHours(0,0,0,0) - b.setHours(0,0,0,0)) / 86400000);
+    }
+
+    // ── Status logic ─────────────────────────────────────────────────────────
+    // Hybrid: if chore has tagged days, status is driven by "next occurrence"
+    // of those days, but the plain frequency countdown still applies as a
+    // soft backup — whichever signals trouble first wins.
+    function getDaysUntilNextTaggedDay(days) {
+      if (!days || days.length === 0) return null;
+      const today = new Date();
+      const todayDow = today.getDay();
+      let min = 8;
+      for (const d of days) {
+        let delta = (d - todayDow + 7) % 7;
+        if (delta < min) min = delta;
+      }
+      return min === 8 ? null : min;
+    }
+
+    function getFrequencyDaysLeft(lastDone, freq) {
       if (!lastDone) return -999;
       const diff = Math.floor((Date.now() - new Date(lastDone)) / 86400000);
       return (FREQ_DAYS[freq] || 7) - diff;
     }
 
-    function getStatus(lastDone, freq, urgent) {
-      if (urgent) return "urgent";
-      const d = getDaysLeft(lastDone, freq);
-      if (d < 0) return "overdue";
-      if (d === 0) return "due";
-      return "ok";
+    function getChoreStatus(chore, lastDone) {
+      if (chore.urgent) return { status: "urgent", daysLeft: null, dayLabel: null };
+
+      const freqLeft = getFrequencyDaysLeft(lastDone, chore.frequency);
+      const hasDays  = chore.days && chore.days.length > 0;
+
+      if (!hasDays) {
+        // Pure frequency countdown
+        if (freqLeft < 0) return { status: "overdue", daysLeft: freqLeft, dayLabel: null, effectiveDaysLeft: freqLeft };
+        if (freqLeft === 0) return { status: "due", daysLeft: freqLeft, dayLabel: null, effectiveDaysLeft: freqLeft };
+        return { status: "ok", daysLeft: freqLeft, dayLabel: null, effectiveDaysLeft: freqLeft };
+      }
+
+      // Has tagged days: figure out if today IS a tagged day and not yet done today
+      const today    = new Date();
+      const todayDow = today.getDay();
+      const doneToday = lastDone && (new Date(lastDone).toDateString() === today.toDateString());
+      const isTaggedToday = chore.days.includes(todayDow) && !doneToday;
+
+      const nextTagDays = getDaysUntilNextTaggedDay(chore.days);
+      const nextDayName = nextTagDays !== null ? DAY_NAMES[(todayDow + nextTagDays) % 7] : null;
+
+      // Frequency backup can still flag overdue even between tagged days
+      if (freqLeft < 0) return { status: "overdue", daysLeft: freqLeft, dayLabel: nextDayName, effectiveDaysLeft: freqLeft };
+      if (isTaggedToday) return { status: "due", daysLeft: 0, dayLabel: "today", effectiveDaysLeft: 0 };
+      if (freqLeft === 0) return { status: "due", daysLeft: freqLeft, dayLabel: nextDayName, effectiveDaysLeft: freqLeft };
+
+      // "ok" but use the sooner of (next tagged day) or (frequency countdown) as the effective horizon
+      const effectiveDaysLeft = Math.min(nextTagDays !== null ? nextTagDays : freqLeft, freqLeft);
+      return { status: "ok", daysLeft: freqLeft, dayLabel: nextDayName, nextTagDays, effectiveDaysLeft };
     }
 
     function formatLastDone(d) {
@@ -125,12 +186,11 @@
     }
 
     function enrichedChores() {
-      return state.chores.map(c => ({
-        ...c,
-        lastDone: state.completions[c.id] || null,
-        status:   getStatus(state.completions[c.id], c.frequency, c.urgent),
-        daysLeft: getDaysLeft(state.completions[c.id], c.frequency),
-      })).sort((a, b) => {
+      return state.chores.map(c => {
+        const lastDone = state.completions[c.id] || null;
+        const r = getChoreStatus(c, lastDone);
+        return { ...c, lastDone, ...r };
+      }).sort((a, b) => {
         const o = { urgent: 0, overdue: 1, due: 2, ok: 3 };
         return o[a.status] - o[b.status];
       });
@@ -166,13 +226,12 @@
         const frequency = document.getElementById("edit-freq").value;
         const assignee  = document.getElementById("edit-assignee").value.trim();
         const note      = document.getElementById("edit-note").value.trim();
+        const days = [0,1,2,3,4,5,6].filter(d => document.getElementById(`edit-day-${d}`).checked);
         if (!name) return;
-        state.chores = state.chores.map(c => c.id === id ? { ...c, name, frequency, assignee, note } : c);
+        state.chores = state.chores.map(c => c.id === id ? { ...c, name, frequency, assignee, note, days } : c);
         state.editChoreId = null;
         saveChores();
       },
-
-      updateNewChore(field, val) { state.newChore[field] = val; },
 
       addChore() {
         const name = document.getElementById("new-chore-name").value.trim();
@@ -180,9 +239,9 @@
         const freq     = document.getElementById("new-chore-freq").value;
         const assignee = document.getElementById("new-chore-assignee").value.trim() || "Luis";
         const note     = document.getElementById("new-chore-note").value.trim();
-        state.chores.push({ id: Date.now(), name, frequency: freq, assignee, urgent: false, note });
+        const days = [0,1,2,3,4,5,6].filter(d => document.getElementById(`new-day-${d}`).checked);
+        state.chores.push({ id: Date.now(), name, frequency: freq, assignee, urgent: false, note, days });
         saveChores();
-        state.newChore = { name: "", frequency: "Weekly", assignee: "Luis", note: "" };
         render();
       },
 
@@ -204,9 +263,80 @@
         saveProjects();
         render();
       },
+
+      // ── Onboarding actions ──────────────────────────────────────────────────
+      updateOnboardDraft(id, val) { state.onboardDrafts[id] = val; },
+
+      setOnboardToday(id) {
+        state.onboardDrafts[id] = todayStr();
+        render();
+      },
+
+      setOnboardNeverDone(id) {
+        state.onboardDrafts[id] = "";
+        render();
+      },
+
+      setAllOnboardToday() {
+        state.chores.forEach(c => state.onboardDrafts[c.id] = todayStr());
+        render();
+      },
+
+      finishOnboarding() {
+        // Read any live input values first
+        state.chores.forEach(c => {
+          const el = document.getElementById(`onboard-date-${c.id}`);
+          if (el) state.onboardDrafts[c.id] = el.value;
+        });
+        const newCompletions = { ...state.completions };
+        state.chores.forEach(c => {
+          const val = state.onboardDrafts[c.id];
+          if (val) {
+            newCompletions[c.id] = new Date(val + "T12:00:00").toISOString();
+          }
+        });
+        state.completions = newCompletions;
+        state.onboarded = true;
+        saveCompletions();
+        saveMeta();
+        render();
+      },
     };
 
-    // ── Render ────────────────────────────────────────────────────────────────
+    // ── Render: onboarding screen ────────────────────────────────────────────
+    function renderOnboarding() {
+      const rows = state.chores.map(c => {
+        const val = state.onboardDrafts[c.id] !== undefined ? state.onboardDrafts[c.id] : "";
+        return `
+          <div class="onboard-row">
+            <div class="onboard-info">
+              <span class="card-name">${c.name}</span>
+              <span class="meta-chip">${c.frequency}${c.note ? " · " + c.note : ""}</span>
+            </div>
+            <input type="date" id="onboard-date-${c.id}" class="inp" value="${val}"
+              onchange="ck.updateOnboardDraft(${c.id}, this.value)" style="color-scheme:dark" />
+            <button class="btn btn-ghost" onclick="ck.setOnboardToday(${c.id})">Today</button>
+            <button class="btn btn-ghost" onclick="ck.setOnboardNeverDone(${c.id})">Never</button>
+          </div>`;
+      }).join("");
+
+      return `
+        <div class="onboard-wrap">
+          <h1 class="onboard-title">👋 Quick setup</h1>
+          <p class="onboard-sub">
+            Before the board goes live, tell me when you last did each chore — otherwise
+            everything looks overdue on day one, which isn't true. Defaults to today;
+            adjust anything that's actually further out, or mark it "Never" if it's brand new.
+          </p>
+          <div class="onboard-actions">
+            <button class="btn btn-ghost" onclick="ck.setAllOnboardToday()">Set all to today</button>
+          </div>
+          <div class="stack">${rows}</div>
+          <button class="btn btn-primary onboard-finish" onclick="ck.finishOnboarding()">Start tracking →</button>
+        </div>`;
+    }
+
+    // ── Render: shared helpers ───────────────────────────────────────────────
     function statusStyle(status) {
       const map = {
         urgent:  { border: "#f59e0b", bg: "rgba(245,158,11,0.08)",  badge: "#f59e0b", badgeBg: "rgba(245,158,11,0.18)",  label: "⚡ Urgent"  },
@@ -221,12 +351,41 @@
       return FREQUENCIES.map(f => `<option value="${f}" ${f === selected ? "selected" : ""}>${f}</option>`).join("");
     }
 
+    function dayCheckboxes(idPrefix, selectedDays) {
+      return DAY_NAMES.map((name, i) => `
+        <label class="day-chip">
+          <input type="checkbox" id="${idPrefix}-${i}" ${selectedDays && selectedDays.includes(i) ? "checked" : ""} />
+          <span>${name}</span>
+        </label>`).join("");
+    }
+
+    function dayLabelFor(chore) {
+      if (!chore.days || chore.days.length === 0) return null;
+      return chore.days.map(d => DAY_NAMES[d]).join("/");
+    }
+
+    // ── Render: board ─────────────────────────────────────────────────────────
     function renderBoard() {
       const all     = enrichedChores();
       const attn    = all.filter(c => c.status !== "ok").length;
       const filtered = state.filter === "all"       ? all
                      : state.filter === "attention" ? all.filter(c => c.status !== "ok")
                      : all.filter(c => c.status === "ok");
+
+      // Coming due: ok-status chores within the next 3 days (today excluded — those are already "due")
+      const comingSoon = all
+        .filter(c => c.status === "ok" && c.effectiveDaysLeft > 0 && c.effectiveDaysLeft <= 3)
+        .sort((a, b) => a.effectiveDaysLeft - b.effectiveDaysLeft);
+
+      const soonStrip = comingSoon.length === 0 ? "" : `
+        <div class="soon-strip">
+          <span class="soon-label">⏳ Coming due</span>
+          <div class="soon-chips">
+            ${comingSoon.map(c => `
+              <span class="soon-chip">${c.name} · ${c.effectiveDaysLeft === 1 ? "tomorrow" : `in ${c.effectiveDaysLeft}d`}</span>
+            `).join("")}
+          </div>
+        </div>`;
 
       const pills = [
         ["all",       `All (${all.length})`],
@@ -237,8 +396,16 @@
       `).join("");
 
       const cards = filtered.map(c => {
-        const s         = statusStyle(c.status);
-        const daysLabel = c.status === "ok" ? `In ${c.daysLeft}d` : s.label;
+        const s = statusStyle(c.status);
+        let daysLabel;
+        if (c.status === "ok") {
+          daysLabel = c.nextTagDays !== undefined && c.nextTagDays !== null
+            ? `Next: ${c.dayLabel}`
+            : `In ${c.daysLeft}d`;
+        } else {
+          daysLabel = s.label;
+        }
+        const dayTag = dayLabelFor(c);
         return `
           <div class="card" style="background:${s.bg};border-color:${s.border}">
             <button class="urgent-dot" style="background:${c.urgent ? "#f59e0b" : "#2a3045"}"
@@ -250,6 +417,7 @@
               </div>
               <div class="card-meta">
                 <span>🔄 ${c.frequency}</span>
+                ${dayTag ? `<span>📌 ${dayTag}</span>` : ""}
                 <span>👤 ${c.assignee}</span>
                 <span>${formatLastDone(c.lastDone)}</span>
                 ${c.note ? `<span>· ${c.note}</span>` : ""}
@@ -262,11 +430,13 @@
       }).join("") || `<p class="empty">Nothing here.</p>`;
 
       return `
+        ${soonStrip}
         <div class="pills">${pills}</div>
         <div class="stack">${cards}</div>
         <p class="hint">Tap the dot on any card to flag it as urgent.</p>`;
     }
 
+    // ── Render: projects ──────────────────────────────────────────────────────
     function renderProjects() {
       const sorted = [...state.projects].sort((a, b) => new Date(a.due) - new Date(b.due));
       const items = sorted.map(p => {
@@ -302,24 +472,33 @@
         </div>`;
     }
 
+    // ── Render: manage ────────────────────────────────────────────────────────
     function renderManage() {
       const rows = state.chores.map(c => {
         if (state.editChoreId === c.id) return `
-          <div class="manage-row" style="border-color:#6366f1">
+          <div class="manage-row manage-row-editing" style="border-color:#6366f1">
             <div class="edit-fields">
               <input id="edit-name"     class="inp" value="${c.name}"      style="flex:2 1 130px" />
               <select id="edit-freq"    class="inp" style="flex:1 1 110px;cursor:pointer">${freqOptions(c.frequency)}</select>
               <input id="edit-assignee" class="inp" value="${c.assignee}"  placeholder="Assignee" style="flex:1 1 90px" />
               <input id="edit-note"     class="inp" value="${c.note || ""}" placeholder="Note" style="flex:1 1 110px" />
+            </div>
+            <div class="day-row">
+              <span class="day-row-label">Specific days (optional):</span>
+              <div class="day-chips">${dayCheckboxes("edit-day", c.days)}</div>
+            </div>
+            <div class="edit-actions">
               <button class="btn btn-primary" onclick="ck.saveChoreEdit(${c.id})">Save</button>
               <button class="btn btn-ghost"   onclick="ck.cancelEdit()">Cancel</button>
             </div>
           </div>`;
+        const dayTag = dayLabelFor(c);
         return `
           <div class="manage-row">
             <div class="card-body">
               <span class="card-name">${c.name}</span>
               <span class="meta-chip">${c.frequency}</span>
+              ${dayTag ? `<span class="meta-chip">📌 ${dayTag}</span>` : ""}
               <span class="meta-chip">· ${c.assignee}</span>
               ${c.note ? `<span class="meta-chip">· ${c.note}</span>` : ""}
             </div>
@@ -330,20 +509,32 @@
 
       return `
         <p class="section-title">Add a chore</p>
-        <div class="add-box" style="margin-bottom:20px">
-          <input  id="new-chore-name"     class="inp" placeholder="Chore name"       style="flex:2 1 150px" />
-          <select id="new-chore-freq"     class="inp" style="flex:1 1 120px;cursor:pointer">${freqOptions("Weekly")}</select>
-          <input  id="new-chore-assignee" class="inp" placeholder="Assignee"          style="flex:1 1 100px" value="Luis" />
-          <input  id="new-chore-note"     class="inp" placeholder="Note (optional)"   style="flex:2 1 140px" />
-          <button class="btn btn-primary" onclick="ck.addChore()">+ Add</button>
+        <div class="add-box add-box-col" style="margin-bottom:20px">
+          <div class="add-fields">
+            <input  id="new-chore-name"     class="inp" placeholder="Chore name"       style="flex:2 1 150px" />
+            <select id="new-chore-freq"     class="inp" style="flex:1 1 120px;cursor:pointer">${freqOptions("Weekly")}</select>
+            <input  id="new-chore-assignee" class="inp" placeholder="Assignee"          style="flex:1 1 100px" value="Luis" />
+            <input  id="new-chore-note"     class="inp" placeholder="Note (optional)"   style="flex:2 1 140px" />
+          </div>
+          <div class="day-row">
+            <span class="day-row-label">Specific days (optional):</span>
+            <div class="day-chips">${dayCheckboxes("new-day", [])}</div>
+          </div>
+          <button class="btn btn-primary" onclick="ck.addChore()" style="align-self:flex-start">+ Add</button>
         </div>
         <p class="section-title">All chores (${state.chores.length})</p>
         <div class="stack">${rows}</div>`;
     }
 
+    // ── Main render ───────────────────────────────────────────────────────────
     function render() {
       if (!state.loaded) {
         document.getElementById("app").innerHTML = `<div class="loading">Loading Chore Knight...</div>`;
+        return;
+      }
+
+      if (!state.onboarded) {
+        document.getElementById("app").innerHTML = renderOnboarding();
         return;
       }
 
@@ -392,6 +583,12 @@
     /* Body */
     .body { max-width: 740px; margin: 0 auto; padding: 20px 16px 60px; }
 
+    /* Due soon strip */
+    .soon-strip  { background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.25); border-radius: 10px; padding: 10px 13px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .soon-label  { font-size: 12px; font-weight: 600; color: #a5b4fc; flex-shrink: 0; }
+    .soon-chips  { display: flex; gap: 6px; flex-wrap: wrap; }
+    .soon-chip   { font-size: 12px; color: #c7d2fe; background: rgba(99,102,241,0.12); padding: 3px 9px; border-radius: 12px; white-space: nowrap; }
+
     /* Pills */
     .pills { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
     .pill  { padding: 5px 12px; border-radius: 20px; border: 1px solid #1e2535; background: transparent; color: #6b7280; font-size: 12px; font-weight: 500; cursor: pointer; }
@@ -427,18 +624,38 @@
     .inp:focus { border-color: #6366f1; }
 
     /* Add box */
-    .add-box { background: #161b27; border: 1px solid #1e2535; border-radius: 12px; padding: 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .add-box     { background: #161b27; border: 1px solid #1e2535; border-radius: 12px; padding: 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .add-box-col { flex-direction: column; align-items: stretch; gap: 12px; }
+    .add-fields  { display: flex; gap: 8px; flex-wrap: wrap; }
 
     /* Section title */
     .section-title { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
 
     /* Manage rows */
     .manage-row { background: #161b27; border: 1px solid #1e2535; border-radius: 10px; padding: 11px 13px; display: flex; align-items: center; gap: 10px; }
+    .manage-row-editing { flex-direction: column; align-items: stretch; gap: 12px; }
     .edit-fields { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; width: 100%; }
+    .edit-actions { display: flex; gap: 8px; }
     .meta-chip   { font-size: 12px; color: #6b7280; margin-left: 4px; }
+
+    /* Day chips */
+    .day-row       { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .day-row-label { font-size: 12px; color: #6b7280; flex-shrink: 0; }
+    .day-chips     { display: flex; gap: 6px; flex-wrap: wrap; }
+    .day-chip      { display: flex; align-items: center; gap: 4px; padding: 5px 9px; border-radius: 7px; border: 1px solid #1e2535; background: #0c1018; font-size: 12px; color: #9ca3af; cursor: pointer; }
+    .day-chip input { accent-color: #6366f1; cursor: pointer; }
 
     /* Empty state */
     .empty { color: #6b7280; text-align: center; padding: 40px 0; font-size: 14px; }
+
+    /* Onboarding */
+    .onboard-wrap  { max-width: 640px; margin: 0 auto; padding: 36px 18px 60px; }
+    .onboard-title { font-size: 22px; font-weight: 700; color: #f9fafb; margin-bottom: 8px; }
+    .onboard-sub   { font-size: 13px; color: #9ca3af; line-height: 1.6; margin-bottom: 18px; }
+    .onboard-actions { margin-bottom: 14px; }
+    .onboard-row   { background: #161b27; border: 1px solid #1e2535; border-radius: 10px; padding: 11px 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .onboard-info  { flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 2px; }
+    .onboard-finish { width: 100%; margin-top: 22px; padding: 12px; font-size: 14px; }
 
     /* Mobile */
     @media (max-width: 480px) {
@@ -446,6 +663,7 @@
       .body   { padding: 14px 12px 60px; }
       .tab-btn { padding: 6px 10px; font-size: 12px; }
       .card   { padding: 11px 12px; }
+      .onboard-wrap { padding: 24px 14px 50px; }
     }
   </style>
 </head>
